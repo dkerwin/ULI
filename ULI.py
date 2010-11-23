@@ -1,4 +1,3 @@
-"""This is the uli class"""
 # -*- coding: utf-8 -*-
 
 import os
