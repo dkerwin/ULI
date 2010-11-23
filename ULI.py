@@ -465,4 +465,8 @@ class Installer:
 /'\_   _/`\ 
 \___)=(___/""", color="cyan"))
         print
+
+if __name__ == "__main__":
+    print("Please use this a a library not as executable")
+    sys.exit(1)
     
