@@ -1,0 +1,59 @@
+---
+global:
+    image: /opt/install/images/gentoo-20101018.tar.bz2
+    hostname: first-install
+    domainname: company.com
+diskmgmt:
+    type: md
+    disks: !!python/tuple ['/dev/sda', '/dev/sdb']
+    partitions:
+        1:
+            size: 100
+            type: "fd"
+        2:
+            size: 10000
+            type: "fd"
+        3:
+            size: 15000
+            type: "fd"
+        4:
+            size: 
+            type: "fd"
+lvm:
+    vg:
+        rootvg:
+            pv: !!python/tuple ['/dev/md2']
+            lv:
+                usrlv: 2500M
+                varlv: 1000M
+                tmplv: 500M
+                swaplv: 1024M
+        datavg:
+            pv: !!python/tuple ['/dev/md3']
+            lv:
+                sqllv: 50G
+fs:
+    /:
+        dev: /dev/md1
+        type: ext3
+    /boot:
+        dev: /dev/md0
+        type: ext2
+    /usr:
+        dev: /dev/rootvg/usrlv
+        type: reiserfs
+    /var:
+        dev: /dev/rootvg/varlv
+        type: reiserfs
+    /tmp:
+        dev: /dev/rootvg/tmplv
+        type: reiserfs
+    none:
+        dev: /dev/rootvg/swaplv
+        type: swap
+net:
+    eth0:
+        ip: dhcp
+    eth1:
+        ip: 10.255.255.1/24
+        routes: !!python/tuple ["default via 10.255.255.254"]
