@@ -63,7 +63,7 @@ UPDATE_VERSION = ULI_UPDATE.VERSION
 
 if UPDATE_VERSION > START_VERSION:
     U = ULI_UPDATE.Installer()
-    U.start_task("Switching U.L.I. version (%s > %s)" % ('.'.join(map(str, UPDATE_VERSION)), '.'.join(map(str, START_VERSION))))
+    U.start_task("Switching U.L.I. version (%s => %s)" % ('.'.join(map(str, START_VERSION)), '.'.join(map(str, UPDATE_VERSION))))
     time.sleep(0.5)
     U.stop_task("ok")
 else:
@@ -75,6 +75,7 @@ else:
 ## Run the install
 ########################################
 
+print
 U.bootstrap()
 
 sys.exit(0)

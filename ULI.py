@@ -8,6 +8,7 @@ import yaml
 import threading
 import urllib
 import urllib2
+import logging
 
 from subprocess import Popen, PIPE, STDOUT
 from termcolor import colored
@@ -16,20 +17,34 @@ VERSION = (0, 9, 2)
 __version__ = '.'.join(map(str, VERSION))
 
 ################################
-# Helper functions
+## Logging
 ################################
 
-def execute(command, expected_rc=0):
+logger = logging.getLogger("ULI")
+lh = logging.FileHandler("/var/log/uli_install.log")
+lh.setFormatter(logging.Formatter("%(asctime)s %(name)s[%(process)d] %(levelname)s: %(message)s"))
+
+logger.addHandler(lh)
+logger.setLevel(logging.DEBUG)
+
+################################
+## Helper functions
+################################
+
+def execute(command, input=None, expected_rc=0):
     """Run commands and return the result back to the caller"""
     
     try:
+        logger.info("Command: %s" % command)
         #if isinstance(command, (tuple, list)):
-        proc = Popen( command.split(), shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT )
-        stdout_value, stderr_value = proc.communicate()
+        proc = Popen( command.split(), shell=False, close_fds=True, stdin=PIPE, stdout=PIPE, stderr=STDOUT )
+        stdout_value, stderr_value = proc.communicate(input=input)
         
         if proc.returncode != expected_rc:
+            logger.error(stdout_value)
             raise Exception( stdout_value )
         else:
+            logger.info(stdout_value)
             return stdout_value
     except:
         raise
@@ -38,16 +53,18 @@ def execute_pipe(command1, command2, expected_rc=0):
     """Run commands and return the result back to the caller"""
     
     try:
+        logger.info("Command: %s | %s" % (command1, command2))
         out  = Popen( command1.split(), shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT )
         proc = Popen( command2.split(), shell=False, stdin=out.stdout, stdout=PIPE, stderr=STDOUT )
         stdout_value, stderr_value = proc.communicate()
         
         if proc.returncode != expected_rc:
-            print( 'Piped command failed with returncode %d' % proc.returncode)
+            logger.error(stdout_value)
             print( stdout_value )
             
             raise Exception( stdout_value )
         else:
+            logger.info(stdout_value)
             return stdout_value
     except:
         raise
@@ -81,11 +98,11 @@ class Installer:
         
         self.backend = self.__get_backend_addr()
         self.download_url = "http://%s/U.L.I." % self.backend
-        #self.download_url = "http://deathstar-mac/~dkerwin/downloads"
+        self.plugin_url = "http://%s/U.L.I./ULI_Plugins.py" % self.backend
         self.mac = self.__get_mac_addr()
-        #self.mac = "ff:ff:ff:ff:ff:ff"
         self.mac_escaped = self.mac.replace(':', '_').lower()
         self.local_config = os.path.join(os.path.dirname(__file__), 'uli.yaml')
+        self.local_plugin = os.path.join(os.path.dirname(__file__), 'ULI_Plugins.py')
         self.msg_length = 0
         self.spinner_active = False
     
@@ -124,6 +141,27 @@ class Installer:
         except OSError:
             logger.exception("Failed to determine terminal size. Fallback to 80x24")
             return [24, 80]
+    
+    def __url_exists(self, url):
+        """Raise if URL is not valid"""
+        
+        try:
+            r = urllib2.urlopen(url)
+            return True
+        except urllib2.URLError, e:
+            if not hasattr(e, "code"):
+                raise
+            else:
+                return False
+    
+    def __url_download(self, url, target):
+        """Download item from url to target"""
+        
+        try:
+            d = urllib.urlretrieve(url, target)
+            return os.path.exists(d[0])
+        except:
+            raise
     
     def start_task(self, msg):
         """Print task description and initialize the spinner"""
@@ -188,34 +226,28 @@ class Installer:
         """Config download (personal or fallback)"""
         
         downloaded = False
-        configs = { 0: { 'can_fail': True,  'cfg': '%s.yaml' % self.mac_escaped, 'url': '%s/%s.yaml' % (self.download_url, self.mac_escaped), },
-                    1: { 'can_fail': False, 'cfg': '00_00_00_00_00_01.yaml', 'url': '%s/00_00_00_00_00_01.yaml' % self.download_url, },
+        configs = { 0: { 'can_fail': True,  'type': 'host', 'cfg': '%s.yaml' % self.mac_escaped, 'url': '%s/%s.yaml' % (self.download_url, self.mac_escaped), },
+                    1: { 'can_fail': False, 'type': 'fallback', 'cfg': '00_00_00_00_00_01.yaml', 'url': '%s/00_00_00_00_00_01.yaml' % self.download_url, },
                   }
         
         for c in configs:
-            try:
-                self.start_task("Attempting to downloading config %s" % configs[c]['cfg'])
-                r = urllib2.urlopen(configs[c]['url'])
-                
+            self.start_task("Attempting to download %s-config %s" % (configs[c]['type'], configs[c]['cfg']))
+            if self.__url_exists(configs[c]['url']):
                 try:
-                    dl = urllib.urlretrieve(configs[c]['url'], self.local_config)
-                    if not os.path.exists(dl[0]):
+                    if self.__url_download(configs[c]['url'], self.local_config):
+                        self.stop_task("ok")
+                    else:
                         self.stop_task("failed")
                         self._error("Failed to download %s" % configs[c]['cfg'])
-                    else:
-                        self.stop_task("ok")
                 except:
                     raise
-            except urllib2.URLError, e:
-                if not hasattr(e, "code"):
-                    raise
-                else:
-                    if configs[c]['can_fail']:
+            else:
+                if configs[c]['can_fail']:
                         self.stop_task("skip")
-                    else:
-                        self.stop_task("failed")
-                        self._error("Failed to download config %s => %s" % (configs[c]['cfg'], e))
-                        raise
+                else:
+                    self.stop_task("failed")
+                    self._error("Failed to download config %s => %s" % (configs[c]['cfg'], e))
+                    raise
     
     def parse_config(self):
         """Parse the YAML config"""
@@ -294,12 +326,12 @@ class Installer:
                     p_ids[p_id] = partitions[p]['type']
                     if not partitions[p]['size']:
                         partitions[p]['size'] = ''
-                    echo_str += ",%s\\n" % partitions[p]['size']
+                    echo_str += ",%s\n" % partitions[p]['size']
                     p_id += 1
                 if len(partitions) < 4:
-                    echo_str += ",\\n"
-                echo_str += ";\\n"
-                execute_pipe("echo -ne %s" % echo_str, "/sbin/sfdisk %s -uM" % d)
+                    echo_str += ",\n"
+                echo_str += ";\n"
+                execute(command="/sbin/sfdisk %s -uM" % d, input=echo_str)
                 
                 for id in p_ids:
                     execute("/sbin/sfdisk --id %s %d %s" % (d, id, p_ids[id]))
@@ -383,7 +415,7 @@ class Installer:
     def install(self):
         
         try:
-            self.start_task("Downloading and installing %s" % self.config['global']['image'])
+            self.start_task("Downloading and installing %s" % self.config['global']['image'].split('/')[-1])
             
             execute_pipe("/usr/bin/ssh -x install@%s cat %s" % (self.backend ,self.config['global']['image']), "tar -C %s -xjpSf -" % self.root)
             self.stop_task("ok")
@@ -403,7 +435,7 @@ class Installer:
             execute("/bin/mount -t sysfs -o bind /sys %s" % os.path.join(self.root, 'sys'))
             self.stop_task("ok")
         except:
-            self.start_task("failed")
+            self.stop_task("failed")
             raise
     
     def configure(self):
@@ -435,9 +467,13 @@ class Installer:
         c.close()
         
         c = open("%s/etc/fstab" % self.root, 'w')
+        c.write("## Created by U.L.I.\n\n")
         for fs in sorted(self.config['fs']):
-            c.write("%s\t%s\t%s\tnoatime\t0 0\n" % (self.config['fs'][fs]['dev'], fs, self.config['fs'][fs]['type']))
-        c.write("shm\t/dev/shm\ttmpfs\tnodev,nosuid,noexec\t0 0\n")
+            default_opts = "noatime"
+            if self.config['fs'][fs]['type'] == "swap":
+                default_opts = "sw"
+            c.write("%s\t\t%s\t%s\t%s\t0 0\n" % (self.config['fs'][fs]['dev'], fs, self.config['fs'][fs]['type'], default_opts))
+        c.write("\nshm\t/dev/shm\ttmpfs\tnodev,nosuid,noexec\t0 0\n")
         c.write("proc\t/proc\tproc\tdefaults\t0 0\n")
         c.write("sysfs\t/sys\tsysfs\tnosuid,nodev,noexec,relatime\t0 0\n")
         c.close()
@@ -448,20 +484,36 @@ class Installer:
         """Install grub"""
         
         self.start_task("Installing GRUB bootloader")
+        c = 0
         for d in self.config['diskmgmt']['disks']:
-            execute_pipe("echo \"find /boot/grub/stage1\ndevice (hd0) /dev/%s\nroot (hd0,0)\nsetup (hd0)" % d, "/sbin/grub --no-floppy")
+            execute(command="/sbin/grub --batch --no-curses --no-floppy", input="find /boot/grub/stage1\ndevice (hd%d) %s\nroot (hd%d,0)\nsetup (hd%d)\nquit\n" % (c, d, c, c))
+            c += 1
         self.stop_task("ok")
+    
+    def plugins(self):
+        """Download and run plugins"""
+        
+        self.start_task("Downloading plugins")
+        if self.__url_exists(self.plugin_url):
+            try:
+                if not self.__url_download(self.plugin_url, self.local_plugin):
+                    self.stop_task("failed")
+                    self._error("Failed to download %s" % self.download_url)
+                    raise
+            except:
+                self.stop_task("failed")
+                raise
     
     def byebye(self):
         """Say bye bye"""
         
         print(colored("""
             .--------------. 
-    .--.   (    Bye Bye!    ) 
+    .--.   (    Bye bye!    ) 
    |o_o |   .--------------´
    |:_/ |  ´ 
   //   \ \ 
- (|     | ) 
+ (| ULI | ) 
 /'\_   _/`\ 
 \___)=(___/""", color="cyan"))
         print
