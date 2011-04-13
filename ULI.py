@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8; tab-width: 4 -*-
 
 import os
 import re
@@ -22,7 +22,8 @@ __version__ = '.'.join(map(str, VERSION))
 
 logger = logging.getLogger("ULI")
 lh = logging.FileHandler("/var/log/uli_install.log")
-lh.setFormatter(logging.Formatter("%(asctime)s %(name)s[%(process)d] %(levelname)s: %(message)s"))
+lh.setFormatter(logging.Formatter("%(asctime)s %(name)s[%(process)d] \
+                                  %(levelname)s: %(message)s"))
 
 logger.addHandler(lh)
 logger.setLevel(logging.DEBUG)
@@ -31,43 +32,48 @@ logger.setLevel(logging.DEBUG)
 ## Helper functions
 ################################
 
+
 def execute(command, input=None, expected_rc=0):
     """Run commands and return the result back to the caller"""
     
     try:
         logger.info("Command: %s" % command)
-        #if isinstance(command, (tuple, list)):
-        proc = Popen( command.split(), shell=False, close_fds=True, stdin=PIPE, stdout=PIPE, stderr=STDOUT )
+        proc = Popen(command.split(), shell=False, close_fds=True, stdin=PIPE,
+                     stdout=PIPE, stderr=STDOUT)
         stdout_value, stderr_value = proc.communicate(input=input)
         
         if proc.returncode != expected_rc:
             logger.error(stdout_value)
-            raise Exception( stdout_value )
+            raise Exception(stdout_value)
         else:
             logger.info(stdout_value)
             return stdout_value
     except:
         raise
 
+
 def execute_pipe(command1, command2, expected_rc=0):
     """Run commands and return the result back to the caller"""
     
     try:
         logger.info("Command: %s | %s" % (command1, command2))
-        out  = Popen( command1.split(), shell=False, stdin=PIPE, stdout=PIPE, stderr=STDOUT )
-        proc = Popen( command2.split(), shell=False, stdin=out.stdout, stdout=PIPE, stderr=STDOUT )
+        out = Popen(command1.split(), shell=False, stdin=PIPE, stdout=PIPE,
+                     stderr=STDOUT)
+        proc = Popen(command2.split(), shell=False, stdin=out.stdout,
+                     stdout=PIPE, stderr=STDOUT)
         stdout_value, stderr_value = proc.communicate()
         
         if proc.returncode != expected_rc:
             logger.error(stdout_value)
-            print( stdout_value )
+            print(stdout_value)
             
-            raise Exception( stdout_value )
+            raise Exception(stdout_value)
         else:
             logger.info(stdout_value)
             return stdout_value
     except:
         raise
+
 
 class Installer:
     
@@ -79,12 +85,17 @@ class Installer:
                 sys.stdout.flush()
                 type = 0
                 while spinner_stop != True:
-                        if type == 0: sys.stdout.write("\b/")
-                        if type == 1: sys.stdout.write("\b-")
-                        if type == 2: sys.stdout.write("\b\\")
-                        if type == 3: sys.stdout.write("\b|")
+                        if type == 0:
+                            sys.stdout.write("\b/")
+                        if type == 1:
+                            sys.stdout.write("\b-")
+                        if type == 2:
+                            sys.stdout.write("\b\\")
+                        if type == 3:
+                            sys.stdout.write("\b|")
                         type += 1
-                        if type == 4: type = 0
+                        if type == 4:
+                            type = 0
                         sys.stdout.flush()
                         time.sleep(0.2)
     
@@ -102,7 +113,6 @@ class Installer:
         self.mac = self.__get_mac_addr()
         self.mac_escaped = self.mac.replace(':', '_').lower()
         self.local_config = os.path.join(os.path.dirname(__file__), 'uli.yaml')
-        self.local_plugin = os.path.join(os.path.dirname(__file__), 'ULI_Plugins.py')
         self.msg_length = 0
         self.spinner_active = False
     
@@ -127,7 +137,8 @@ class Installer:
     def __get_backend_addr(self):
         """Get backend IP from routing table (default gw)"""
         
-        GW = re.compile('^default\svia\s(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s')
+        GW = re.compile(
+                    r'^default\svia\s(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s')
         routes = execute('/sbin/ip route list')
         for r in routes.splitlines():
             if GW.match(r):
@@ -139,7 +150,7 @@ class Installer:
         try:
             return map(int, os.popen('stty size', 'r').read().split())
         except OSError:
-            logger.exception("Failed to determine terminal size. Fallback to 80x24")
+            logger.exception("Failed to get terminal size (Fallback: 80x24)")
             return [24, 80]
     
     def __url_exists(self, url):
@@ -154,7 +165,7 @@ class Installer:
             else:
                 return False
     
-    def __url_download(self, url, target):
+    def __url_fetch(self, url, target):
         """Download item from url to target"""
         
         try:
@@ -185,7 +196,7 @@ class Installer:
         spinner_stop = True
         
         if state == "ok":
-            o   = "[ ok ]"
+            o = "[ ok ]"
             c = "green"
         elif state == "failed":
             o = "[ !! ]"
@@ -226,19 +237,27 @@ class Installer:
         """Config download (personal or fallback)"""
         
         downloaded = False
-        configs = { 0: { 'can_fail': True,  'type': 'host', 'cfg': '%s.yaml' % self.mac_escaped, 'url': '%s/%s.yaml' % (self.download_url, self.mac_escaped), },
-                    1: { 'can_fail': False, 'type': 'fallback', 'cfg': '00_00_00_00_00_01.yaml', 'url': '%s/00_00_00_00_00_01.yaml' % self.download_url, },
+        configs = {0: {'can_fail': True, 'type': 'host',
+                       'cfg': '%s.yaml' % self.mac_escaped,
+                       'url': '%s/%s.yaml' %
+                        (self.download_url, self.mac_escaped), },
+                   1: {'can_fail': False, 'type': 'fallback',
+                       'cfg': '00_00_00_00_00_01.yaml',
+                       'url': '%s/00_00_00_00_00_01.yaml' %
+                        self.download_url, },
                   }
         
         for c in configs:
-            self.start_task("Attempting to download %s-config %s" % (configs[c]['type'], configs[c]['cfg']))
+            self.start_task("Attempting to download %s-config %s" %
+                            (configs[c]['type'], configs[c]['cfg']))
             if self.__url_exists(configs[c]['url']):
                 try:
-                    if self.__url_download(configs[c]['url'], self.local_config):
+                    if self.__url_fetch(configs[c]['url'], self.local_config):
                         self.stop_task("ok")
                     else:
                         self.stop_task("failed")
-                        self._error("Failed to download %s" % configs[c]['cfg'])
+                        self._error("Failed to download %s" %
+                                    configs[c]['cfg'])
                 except:
                     raise
             else:
@@ -246,7 +265,8 @@ class Installer:
                         self.stop_task("skip")
                 else:
                     self.stop_task("failed")
-                    self._error("Failed to download config %s => %s" % (configs[c]['cfg'], e))
+                    self._error("Failed to download config %s => %s" %
+                                (configs[c]['cfg'], e))
                     raise
     
     def parse_config(self):
@@ -288,7 +308,7 @@ class Installer:
                 for md in os.listdir('/dev/md'):
                     execute("/sbin/mdadm --stop /dev/md/%s" % md)
             
-            for i in range(0,4):
+            for i in range(0, 4):
                 try:
                     execute("/sbin/mdadm --stop /dev/md%d" % i)
                 except:
@@ -304,7 +324,8 @@ class Installer:
             for d in self.config['diskmgmt']['disks']:
                 if not d in disks_found:
                     self.stop_task("failed")
-                    self._error("Disk %s not found on system (%s)" % (d, ",".join(disks_found)))
+                    self._error("Disk %s not found on system (%s)" %
+                                (d, ",".join(disks_found)))
                     raise
             
             self.stop_task("ok")
@@ -317,7 +338,8 @@ class Installer:
         
         try:
             partitions = self.config['diskmgmt']['partitions']
-            self.start_task("Disk partitioning (%s)" % ", ".join(self.config['diskmgmt']['disks']))
+            self.start_task("Disk partitioning (%s)" %
+                            ", ".join(self.config['diskmgmt']['disks']))
             for d in self.config['diskmgmt']['disks']:
                 echo_str = ""
                 p_id = 1
@@ -338,7 +360,8 @@ class Installer:
                 execute("/sbin/sfdisk -R %s" % d)
                 
                 for id in p_ids:
-                    execute("/bin/dd if=/dev/urandom of=%s%d bs=5k count=1024" % (d, id))
+                    execute("/bin/dd if=/dev/urandom of=%s%d bs=5k count=1024"
+                            % (d, id))
                 
             self.stop_task("ok")
         except:
@@ -366,7 +389,9 @@ class Installer:
                 except:
                     pass
             
-            execute("/sbin/mdadm --create --force --metadata=0.90 --verbose /dev/md%d --level=1 --auto=yes --raid-devices=2 %s" % (md_id, devs))
+            execute("/sbin/mdadm --create --force --metadata=0.90 --verbose \
+                     /dev/md%d --level=1 --auto=yes --raid-devices=2 %s" %
+                     (md_id, devs))
         self.stop_task("ok")
     
     def lvm(self):
@@ -383,13 +408,14 @@ class Installer:
                 execute("/sbin/pvcreate -ff -y %s" % pv)
             execute("/sbin/vgcreate %s %s" % (v, " ".join(vg['pv'])))
             for lv in vg['lv']:
-                execute("/sbin/lvcreate -n %s -L %s %s" % (lv, vg['lv'][lv], v))
+                execute("/sbin/lvcreate -n %s -L %s %s" %
+                        (lv, vg['lv'][lv], v))
         
         self.stop_task("ok")
     
     def filesystems(self):
         
-        opts = { "ext2": "-F", "ext3": "-F", "reiserfs": "-f" }
+        opts = {"ext2": "-F", "ext3": "-F", "reiserfs": "-f"}
         
         self.start_task("Creating and mounting filesystems")
         if "fs" not in self.config:
@@ -405,8 +431,14 @@ class Installer:
                 stripped_fs = fs.lstrip('/')
                 if not os.path.exists(os.path.join(self.root, stripped_fs)):
                     os.mkdir(os.path.join(self.root, stripped_fs))
-                execute("/sbin/mkfs.%s %s %s" % (self.config['fs'][fs]['type'], opts[self.config['fs'][fs]['type']], self.config['fs'][fs]['dev']))
-                execute("/bin/mount -t %s %s %s" % (self.config['fs'][fs]['type'], self.config['fs'][fs]['dev'], os.path.join(self.root, stripped_fs)))
+                execute("/sbin/mkfs.%s %s %s" %
+                        (self.config['fs'][fs]['type'],
+                         opts[self.config['fs'][fs]['type']],
+                         self.config['fs'][fs]['dev']))
+                execute("/bin/mount -t %s %s %s" %
+                        (self.config['fs'][fs]['type'],
+                         self.config['fs'][fs]['dev'],
+                         os.path.join(self.root, stripped_fs)))
             self.stop_task("ok")
         except:
             self.stop_task("failed")
@@ -415,9 +447,12 @@ class Installer:
     def install(self):
         
         try:
-            self.start_task("Downloading and installing %s" % self.config['global']['image'].split('/')[-1])
+            self.start_task("Downloading and installing %s" %
+                            self.config['global']['image'].split('/')[-1])
             
-            execute_pipe("/usr/bin/ssh -x install@%s cat %s" % (self.backend ,self.config['global']['image']), "tar -C %s -xjpSf -" % self.root)
+            execute_pipe("/usr/bin/ssh -x install@%s cat %s" %
+                         (self.backend, self.config['global']['image']),
+                          "tar -C %s -xjpSf -" % self.root)
             self.stop_task("ok")
         except:
             self.stop_task("failed")
@@ -431,8 +466,10 @@ class Installer:
                 os.mkdir(os.path.join(self.root, 'proc'))
             if not os.path.exists(os.path.join(self.root, 'sys')):
                 os.mkdir(os.path.join(self.root, 'sys'))
-            execute("/bin/mount -t proc -o bind /proc %s" % os.path.join(self.root, 'proc'))
-            execute("/bin/mount -t sysfs -o bind /sys %s" % os.path.join(self.root, 'sys'))
+            execute("/bin/mount -t proc -o bind /proc %s" %
+                    os.path.join(self.root, 'proc'))
+            execute("/bin/mount -t sysfs -o bind /sys %s" %
+                    os.path.join(self.root, 'sys'))
             self.stop_task("ok")
         except:
             self.stop_task("failed")
@@ -445,16 +482,18 @@ class Installer:
         
         if "net" in self.config:
             os.chdir("%s/etc/init.d" % self.root)
-            c = open("%s/etc/conf.d/net" %  self.root, 'w')
+            c = open("%s/etc/conf.d/net" % self.root, 'w')
             c.write('modules=( "iproute2")\n')
             
             for nic in sorted(self.config['net']):
                 if not os.path.exists("net.%s" % nic):
                     os.symlink("net.lo", "net.%s" % nic)
                 
-                c.write('config_%s=( "%s" )\n' % (nic, self.config['net'][nic]['ip']))
+                c.write('config_%s=( "%s" )\n' %
+                        (nic, self.config['net'][nic]['ip']))
                 if 'routes' in self.config['net'][nic]:
-                    c.write('routes_%s=( "%s" )\n' % (nic, self.config['net'][nic]['routes']))
+                    c.write('routes_%s=( "%s" )\n' %
+                            (nic, self.config['net'][nic]['routes']))
             
             c.close()
         
@@ -463,7 +502,10 @@ class Installer:
         c.close()
         
         c = open("%s/etc/hosts" % self.root, 'w')
-        c.write("127.0.0.1\t%s.%s %s localhost\n" % (self.config['global']['hostname'], self.config['global']['domainname'], self.config['global']['hostname']))
+        c.write("127.0.0.1\t%s.%s %s localhost\n" %
+                (self.config['global']['hostname'],
+                 self.config['global']['domainname'],
+                 self.config['global']['hostname']))
         c.close()
         
         c = open("%s/etc/fstab" % self.root, 'w')
@@ -472,7 +514,11 @@ class Installer:
             default_opts = "noatime"
             if self.config['fs'][fs]['type'] == "swap":
                 default_opts = "sw"
-            c.write("%s\t\t%s\t%s\t%s\t0 0\n" % (self.config['fs'][fs]['dev'], fs, self.config['fs'][fs]['type'], default_opts))
+            c.write("%s\t\t%s\t%s\t%s\t0 0\n" %
+                    (self.config['fs'][fs]['dev'],
+                     fs,
+                     self.config['fs'][fs]['type'],
+                     default_opts))
         c.write("\nshm\t/dev/shm\ttmpfs\tnodev,nosuid,noexec\t0 0\n")
         c.write("proc\t/proc\tproc\tdefaults\t0 0\n")
         c.write("sysfs\t/sys\tsysfs\tnosuid,nodev,noexec,relatime\t0 0\n")
@@ -486,7 +532,9 @@ class Installer:
         self.start_task("Installing GRUB bootloader")
         c = 0
         for d in self.config['diskmgmt']['disks']:
-            execute(command="/sbin/grub --batch --no-curses --no-floppy", input="find /boot/grub/stage1\ndevice (hd%d) %s\nroot (hd%d,0)\nsetup (hd%d)\nquit\n" % (c, d, c, c))
+            execute(command="/sbin/grub --batch --no-curses --no-floppy",
+                    input="find /boot/grub/stage1\ndevice (hd%d) %s\nroot \
+                          (hd%d,0)\nsetup (hd%d)\nquit\n" % (c, d, c, c))
             c += 1
         self.stop_task("ok")
     
@@ -496,10 +544,11 @@ class Installer:
         self.start_task("Downloading plugins")
         if self.__url_exists(self.plugin_url):
             try:
-                if not self.__url_download(self.plugin_url, self.local_plugin):
+                if not self.__url_fetch(self.plugin_url, self.local_plugin):
                     self.stop_task("failed")
                     self._error("Failed to download %s" % self.download_url)
                     raise
+                self.stop_task("ok")
             except:
                 self.stop_task("failed")
                 raise
@@ -521,4 +570,3 @@ class Installer:
 if __name__ == "__main__":
     print("Please use this a a library not as executable")
     sys.exit(1)
-    
