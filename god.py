@@ -19,7 +19,8 @@ os.system("clear")
 
 print("#" * 60)
 print("##")
-print("## %s" % colored("U.L.I. - Unattended Linux Installer", "cyan", attrs=["bold"]))
+print("## %s" % colored("U.L.I. - Unattended Linux Installer", "cyan",
+                        attrs=["bold"]))
 print("## ===================================")
 print("##")
 print("## Author  : Daniel Kerwin (daniel@linuxaddicted.de)")
@@ -35,10 +36,10 @@ U = ULI.Installer()
 ########################################
 
 try:
-    U.start_task("Connection to backend server %s" % U.download_url)
-    r = urllib2.urlopen("%s/ULI_2.py" % U.download_url)
+    U.start_task("Connection to backend server %s/" % U.download_url)
+    r = urllib2.urlopen("%s/ULI.py" % U.download_url)
     U.stop_task("ok")
-except urllib2.URLError, e:
+except urllib2.URLError as e:
     U.stop_task("failed")
     if not hasattr(e, "code"):
         raise
@@ -49,7 +50,9 @@ except urllib2.URLError, e:
 
 try:
     U.start_task("Self-updating U.L.I. from backend")
-    dl = urllib.urlretrieve("%s/ULI_2.py" % U.download_url, os.path.join(os.path.dirname(__file__), 'ULI_UPDATE.py'))
+    dl = urllib.urlretrieve("%s/ULI_2.py" % U.download_url,
+                            os.path.join(os.path.dirname(__file__),
+                                         'ULI_UPDATE.py'))
     if not os.path.exists(dl[0]):
         U.stop_task("failed")
         U._error("Failed to download ULI.py")
@@ -63,11 +66,15 @@ UPDATE_VERSION = ULI_UPDATE.VERSION
 
 if UPDATE_VERSION > START_VERSION:
     U = ULI_UPDATE.Installer()
-    U.start_task("Switching U.L.I. version (%s => %s)" % ('.'.join(map(str, START_VERSION)), '.'.join(map(str, UPDATE_VERSION))))
+    U.start_task("Switching U.L.I. version (%s => %s)" %
+                 ('.'.join(map(str, START_VERSION)),
+                  '.'.join(map(str, UPDATE_VERSION))))
     time.sleep(0.5)
     U.stop_task("ok")
 else:
-    U.start_task("Skipped U.L.I. update (%s == %s)" % ('.'.join(map(str, UPDATE_VERSION)), '.'.join(map(str, START_VERSION))))
+    U.start_task("Skipped U.L.I. update (%s == %s)" %
+                 ('.'.join(map(str, UPDATE_VERSION)),
+                  '.'.join(map(str, START_VERSION))))
     time.sleep(0.5)
     U.stop_task("skip")
 
