@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import select
 import time
 import yaml
 import threading
@@ -13,12 +14,12 @@ import logging
 from subprocess import Popen, PIPE, STDOUT
 from termcolor import colored
 
-VERSION = (0, 9, 2)
+VERSION = (0, 9, 3)
 __version__ = '.'.join(map(str, VERSION))
 
-################################
+##******************************
 ## Logging
-################################
+##******************************
 
 logger = logging.getLogger("ULI")
 lh = logging.FileHandler("/var/log/uli_install.log")
@@ -28,9 +29,9 @@ lh.setFormatter(logging.Formatter("%(asctime)s %(name)s[%(process)d] \
 logger.addHandler(lh)
 logger.setLevel(logging.DEBUG)
 
-################################
+##******************************
 ## Helper functions
-################################
+##******************************
 
 
 def execute(command, input=None, expected_rc=0):
@@ -75,7 +76,24 @@ def execute_pipe(command1, command2, expected_rc=0):
         raise
 
 
+##******************************
+## Classes
+##******************************
+
+
+class UliException(Exception):
+    """Just a simple, generic exception class for U.L.I."""
+    
+    def __init__(self, err):
+        self.err = err
+    
+    def __str__(self):
+        logger.exception(self.err)
+        return repr(self.err)
+
+
 class Installer:
+    """Installer class: This is where the magic happens"""
     
     spinner_stop = False
     
@@ -110,23 +128,28 @@ class Installer:
         self.backend = self.__get_backend_addr()
         self.download_url = "http://%s/U.L.I." % self.backend
         self.plugin_url = "http://%s/U.L.I./ULI_Plugins.py" % self.backend
-        self.mac = self.__get_mac_addr()
-        self.mac_escaped = self.mac.replace(':', '_').lower()
+        self.mac_escaped = self.__get_mac_addr().replace(':', '_').lower()
         self.local_config = os.path.join(os.path.dirname(__file__), 'uli.yaml')
         self.msg_length = 0
         self.spinner_active = False
+        self.nfs_mount = "/mnt/images"
     
-    def _print(self, msg, color=None, nl=True, attr=None):
+    def __print(self, msg, color=None, nl=True, attr=None):
+        """Print colored messages to STDOUT"""
         if nl:
             print(colored(msg, color, attrs=attr))
         else:
             print(colored(msg, color, attrs=attr)),
+        sys.stdout.flush()
     
-    def _error(self, msg):
+    def __error(self, msg):
+        """Print errors to STDOUT and raise"""
         print(colored("\n[error] %s\n" % msg, "red", attrs=["bold"]))
+        sys.stdout.flush()
+        raise UliException(msg)
     
     def __get_mac_addr(self):
-        """Get the MAC address from the first interface"""
+        """Get MAC address of eth0"""
         
         MAC = re.compile('^\s+link\/ether\s+([0-9a-fA-F\:]+)\s+')
         ipd = execute('/sbin/ip addr list eth0')
@@ -150,7 +173,7 @@ class Installer:
         try:
             return map(int, os.popen('stty size', 'r').read().split())
         except OSError:
-            logger.exception("Failed to get terminal size (Fallback: 80x24)")
+            logger.error("Failed to get terminal size (Fallback: 80x24)")
             return [24, 80]
     
     def __url_exists(self, url):
@@ -168,49 +191,46 @@ class Installer:
     def __url_fetch(self, url, target):
         """Download item from url to target"""
         
-        try:
-            d = urllib.urlretrieve(url, target)
-            return os.path.exists(d[0])
-        except:
-            raise
+        d = urllib.urlretrieve(url, target)
+        return os.path.exists(d[0])
     
-    def start_task(self, msg):
+    def start_task(self, msg, spinner=True):
         """Print task description and initialize the spinner"""
         
-        progress = self.Spinner()
-        
-        global spinner_stop
-        spinner_stop = False
+        if spinner:
+            progress = self.Spinner()
+            global spinner_stop
+            spinner_stop = False
         
         output = ">> %s  " % msg
-        self.msg_length = len(output)
+        self.msg_length = len(output)        
+        colored_output = output.replace(">>", colored(">>", "cyan", attrs=["bold"]))
         
-        self._print(output, None, False)
-        self.spinner_active = True
-        progress.start()
+        self.__print(colored_output, None, False)
+        
+        if spinner:
+            self.spinner_active = True
+            progress.start()
     
-    def stop_task(self, state):
+    def stop_task(self, state, spinner=True):
         """Print task result and terminate spinner"""
         
-        global spinner_stop
-        spinner_stop = True
+        if spinner:
+            global spinner_stop
+            spinner_stop = True
         
-        if state == "ok":
-            o = "[ ok ]"
-            c = "green"
-        elif state == "failed":
-            o = "[ !! ]"
-            c = "red"
-        elif state == "warning":
-            o = "[ !? ]"
-            c = "cyan"
-        elif state == "skip":
-            o = "[ -- ]"
-            c = "yellow"
+        s_map = {'ok': ('[ ok ]', 'green',),
+                 'failed': ('[ !! ]', 'red',),
+                 'warning': ('[ !? ]', 'red',),
+                 'skip': ('[ -- ]', 'yellow',),
+                }
         
-        spacer = " " * (self.__get_screen_dim()[1] - self.msg_length - len(o))
-        self._print("\b %s%s" % (spacer, o), c, attr=["bold"])
-        self.spinner_active = False
+        ws = " " * (self.__get_screen_dim()[1] - self.msg_length - len(s_map[state][0]))
+        self.__print("\b %s%s" % (ws, s_map[state][0]),
+                                  s_map[state][1], attr=["bold"])
+        
+        if spinner:
+            self.spinner_active = False
     
     def bootstrap(self):
         """This is the bootstrap"""
@@ -218,6 +238,11 @@ class Installer:
         try:
             self.download_config()
             self.parse_config()
+            
+            if self.config['global']['interactive'] is True:
+                self.mount_nfs()
+                self.image_selection()
+            
             self.verify_disks()
             self.partitioning()
             self.mdadm()
@@ -252,11 +277,12 @@ class Installer:
                             (configs[c]['type'], configs[c]['cfg']))
             if self.__url_exists(configs[c]['url']):
                 try:
-                    if self.__url_fetch(configs[c]['url'], self.local_config):
+                    if self.__url_fetch(configs[c]['url'],
+                                          self.local_config):
                         self.stop_task("ok")
                     else:
                         self.stop_task("failed")
-                        self._error("Failed to download %s" %
+                        self.__error("Failed to download %s" %
                                     configs[c]['cfg'])
                 except:
                     raise
@@ -265,7 +291,7 @@ class Installer:
                         self.stop_task("skip")
                 else:
                     self.stop_task("failed")
-                    self._error("Failed to download config %s => %s" %
+                    self.__error("Failed to download config %s => %s" %
                                 (configs[c]['cfg'], e))
                     raise
     
@@ -278,14 +304,57 @@ class Installer:
             self.stop_task("ok")
         except yaml.YAMLError, e:
             self.stop_task("failed")
-            self._error("Failed to parse YAML config: %s" % e)
+            self.__error("Failed to parse YAML config: %s" % e)
+            raise
+    
+    def mount_nfs(self):
+        """Mount the NFS images share"""
+        
+        try:
+            self.start_task("Mounting images NFS share")
+            if not os.path.isdir("/mnt/images"):
+                os.mkdir('/mnt/images')
+            if os.path.ismount("/mnt/images"):
+                execute("/bin/umount /mnt/images")
+            execute("/bin/mount -t nfs %s:/data/images /mnt/images -o intr,bg" % self.backend)
+            self.stop_task("ok")
+        except Exception, e:
+            self.stop_task("failed")
+            self.__error("Failed to mount images via NFS: %s" % e)
+            raise
+    
+    def image_selection(self):
+        """Display image list and wait for the selection"""
+        
+        try:
+            self.start_task("Interctive mode. Select image\n\n", spinner=False)
+            images = sorted(filter(lambda x: os.path.isfile(os.path.join(self.nfs_mount, x)) and not x.startswith('.'), os.listdir(self.nfs_mount)))
+            for id, value in enumerate(images):
+                self.__print("\t%d) %s" % (id, value))
+            
+            self.__print("\n\t666) Image from config: %s\n" % self.config['global']['image'])
+            choice = "undef"
+            
+            while True:
+                if not choice.isdigit() and (choice not in images or choice != 666):
+                    choice = raw_input(">> Selection: ")
+                else:
+                    choice = int(choice)
+                    break
+            
+            if choice != 666:
+                self.config['global']['image'] = images[choice]
+            self.__print(">> Set image to '%s'" % images[choice])
+        except Exception, e:
+            self.stop_task("failed")
+            self.__error("Failed to select image: %s" % e)
             raise
     
     def verify_disks(self):
         """Verify all disks are found and sizes match"""
         
         if len(self.config['diskmgmt']['partitions']) > 4:
-            self._error("You cannot create more than 4 partitions in U.L.I")
+            self.__error("You cannot create more than 4 partitions in U.L.I")
             raise
         
         try:
@@ -303,6 +372,8 @@ class Installer:
             for v in vgs.splitlines():
                 if VG_PV.match(v):
                     execute("/sbin/vgchange -an %s" % VG_PV.match(v).group(1))
+            
+            execute("/sbin/vgchange -an")
             
             if os.path.exists('/dev/md'):
                 for md in os.listdir('/dev/md'):
@@ -324,14 +395,46 @@ class Installer:
             for d in self.config['diskmgmt']['disks']:
                 if not d in disks_found:
                     self.stop_task("failed")
-                    self._error("Disk %s not found on system (%s)" %
+                    self.__error("Disk %s not found on system (%s)" %
                                 (d, ",".join(disks_found)))
                     raise
             
             self.stop_task("ok")
         except:
-            self._error("Failed to prepare disks")
+            self.__error("Failed to prepare disk(s)")
             raise
+    
+    def make_disk_img(self):
+        """Create a new VM disk image"""
+        
+        if self.config['diskmgmt']['type'] == "vm" and \
+           size in self.config['diskmgmt']:
+            disk_img = "/data/%s.img" % self.config["global"]["hostname"]
+            self.start_task("Creating a new VM disk (%s | %s)" %
+                            (disk_img, self.config['diskmgmt']['size']))
+            if os.path.exists(disk_img):
+                self.stop_task("failed")
+                self.__error("Disk image %s already exists!" % disk_img)
+            
+            ## Calculate free space (bytes + 1G)
+            fs_stat = os.statvfs('/data')
+            fs_free = (fs_stat.f_bsize * fs_stat.f_bavail) - 1073741824
+            
+            ## Calculate disk image requirements
+            exp_map = {'M': 1024 ** 2, 'G': 1024 ** 3}
+            img_size = self.config['diskmgmt']['size'][:-1] * \
+                           exp_map[self.config['diskmgmt']['size'][-1]]
+            
+            if fs_free <= img_size:
+                self.stop_task("failed")
+                self.__error("Cannot create VM image. Insufficient disk \
+                                space (%s < %s)" % (fs_free, img_size))
+            
+            with open(disk_img, "w") as f:
+                f.truncate(img_size)
+            self.stop_task("ok")
+            
+            os.path.ismount
     
     def partitioning(self):
         """This is how i act on partitions"""
@@ -362,7 +465,11 @@ class Installer:
                 for id in p_ids:
                     execute("/bin/dd if=/dev/urandom of=%s%d bs=5k count=1024"
                             % (d, id))
-                
+                    try:
+                        execute("/sbin/mdadm --zero-superblock %s%d" % (d, p_id))
+                    except:
+                        pass
+            
             self.stop_task("ok")
         except:
             self.stop_task("failed")
@@ -420,7 +527,7 @@ class Installer:
         self.start_task("Creating and mounting filesystems")
         if "fs" not in self.config:
             self.stop_task("failed")
-            self._error("fs key is missing in config but required!")
+            self.__error("fs key is missing in config but required!")
             raise
         
         try:
@@ -447,12 +554,15 @@ class Installer:
     def install(self):
         
         try:
-            self.start_task("Downloading and installing %s" %
-                            self.config['global']['image'].split('/')[-1])
+            self.start_task("Installing %s" % self.config['global']['image'])
+            execute("/bin/tar -C %s -xjSpf %s/%s" % (self.root, self.nfs_mount, self.config['global']['image']))
             
-            execute_pipe("/usr/bin/ssh -x install@%s cat %s" %
-                         (self.backend, self.config['global']['image']),
-                          "tar -C %s -xjpSf -" % self.root)
+            #self.start_task("Downloading and installing %s" %
+            #                self.config['global']['image'].split('/')[-1])
+            # 
+            #execute_pipe("/usr/bin/ssh -x install@%s cat %s" %
+            #             (self.backend, self.config['global']['image']),
+            #              "tar -C %s -xjpSf -" % self.root)
             self.stop_task("ok")
         except:
             self.stop_task("failed")
@@ -494,7 +604,8 @@ class Installer:
                 if 'routes' in self.config['net'][nic]:
                     c.write('routes_%s=( "%s" )\n' %
                             (nic, self.config['net'][nic]['routes']))
-            
+                
+                execute("/usr/bin/chroot %s /sbin/rc-update add net.%s default" % (self.root, nic))
             c.close()
         
         c = open("%s/etc/conf.d/hostname" % self.root, 'w')
@@ -524,6 +635,13 @@ class Installer:
         c.write("sysfs\t/sys\tsysfs\tnosuid,nodev,noexec,relatime\t0 0\n")
         c.close()
         
+        c = open("%s/boot/grub/grub.conf" % self.root, 'w')
+        c.write("default 0\ntimeout 10\n\n")
+        c.write("title Gentoo Linux\n")
+        c.write("root (hd0,0)\n")
+        c.write("kernel /boot/vmlinuz root=%s\n\n" % self.config["fs"]["/"]["dev"])
+        c.close()
+        
         self.stop_task("ok")
     
     def grub(self):
@@ -546,7 +664,7 @@ class Installer:
             try:
                 if not self.__url_fetch(self.plugin_url, self.local_plugin):
                     self.stop_task("failed")
-                    self._error("Failed to download %s" % self.download_url)
+                    self.__error("Failed to download %s" % self.download_url)
                     raise
                 self.stop_task("ok")
             except:
@@ -568,5 +686,5 @@ class Installer:
         print
 
 if __name__ == "__main__":
-    print("Please use this a a library not as executable")
+    print("This is a lib not a executable")
     sys.exit(1)

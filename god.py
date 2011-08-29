@@ -1,4 +1,4 @@
-"""Hi there! It's me, God"""
+# -*- coding: utf-8; tab-width: 4 -*-
 
 import os
 import sys

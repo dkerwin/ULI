@@ -3,6 +3,7 @@ global:
     image: /opt/install/images/gentoo-20101018.tar.bz2
     hostname: first-install
     domainname: company.com
+    interactive: !!bool "Yes"
 diskmgmt:
     type: md
     disks: !!python/tuple ['/dev/sda', '/dev/sdb']

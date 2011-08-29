@@ -2,4 +2,5 @@
 *.kpf
 dist/
 build/
+.komodotools/
 MANIFEST
